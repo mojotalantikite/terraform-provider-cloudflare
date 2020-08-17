@@ -50,6 +50,19 @@ var secretTextBindingResource = &schema.Resource{
 	},
 }
 
+var wasmModuleBindingResource = &schema.Resource{
+	Schema: map[string]*schema.Schema{
+		"name": {
+			Type:     schema.TypeString,
+			Required: true,
+		},
+		"part": {
+			Type:     schema.TypeString,
+			Required: true,
+		},
+	},
+}
+
 func resourceCloudflareWorkerScript() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceCloudflareWorkerScriptCreate,
@@ -84,6 +97,11 @@ func resourceCloudflareWorkerScript() *schema.Resource {
 				Type:     schema.TypeSet,
 				Optional: true,
 				Elem:     kvNamespaceBindingResource,
+			},
+			"wasm_module_binding": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem:     wasmModuleBindingResource,
 			},
 		},
 	}
@@ -145,6 +163,13 @@ func parseWorkerBindings(d *schema.ResourceData, bindings ScriptBindings) {
 		data := rawData.(map[string]interface{})
 		bindings[data["name"].(string)] = cloudflare.WorkerSecretTextBinding{
 			Text: data["text"].(string),
+		}
+	}
+
+	for _, rawData := range d.Get("wasm_module_binding").(*schema.Set).List() {
+		data := rawData.(map[string]interface{})
+		bindings[data["name"].(string)] = cloudflare.WorkerWebAssemblyBinding{
+			Module: strings.NewReader(data["part"].(string)),
 		}
 	}
 }
@@ -222,6 +247,7 @@ func resourceCloudflareWorkerScriptRead(d *schema.ResourceData, meta interface{}
 	kvNamespaceBindings := &schema.Set{F: schema.HashResource(kvNamespaceBindingResource)}
 	plainTextBindings := &schema.Set{F: schema.HashResource(plainTextBindingResource)}
 	secretTextBindings := &schema.Set{F: schema.HashResource(secretTextBindingResource)}
+	wasmModuleBindings := &schema.Set{F: schema.HashResource(wasmModuleBindingResource)}
 
 	for name, binding := range bindings {
 		switch v := binding.(type) {
@@ -245,6 +271,11 @@ func resourceCloudflareWorkerScriptRead(d *schema.ResourceData, meta interface{}
 				"name": name,
 				"text": value,
 			})
+		case cloudflare.WorkerWebAssemblyBinding:
+			wasmModuleBindings.Add(map[string]interface{}{
+				"name": name,
+				"part": v.Module,
+			})
 		}
 	}
 
@@ -262,6 +293,10 @@ func resourceCloudflareWorkerScriptRead(d *schema.ResourceData, meta interface{}
 
 	if err := d.Set("secret_text_binding", secretTextBindings); err != nil {
 		return fmt.Errorf("cannot set secret text bindings (%s): %v", d.Id(), err)
+	}
+
+	if err := d.Set("wasm_module_binding", wasmModuleBindings); err != nil {
+		return fmt.Errorf("cannot set wasm module bindings (%s): %v", d.Id(), err)
 	}
 
 	return nil
